@@ -1,45 +1,44 @@
+import * as dotenv from 'dotenv';
+dotenv.config();
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import {
-  ApplicationConfig,
-  AuthenticationServiceApplication,
-} from '@sourceloop/authentication-service/dist/application';
-import { juggler } from '@loopback/repository';
+import { SourceLoop } from './sourceloop';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
-process.env.JWT_SECRET = 'secret';
-process.env.JWT_ISSUER = 'sourcefuse';
-process.env.USER_TEMP_PASSWORD = 'test123!@#';
-global.authService = null;
+declare global {
+  // eslint-disable-next-line no-var
+  var sourceloop: SourceLoop;
+}
+
+global.sourceloop = null;
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  const config: ApplicationConfig = {
-    rest: {
-      listenOnStart: false,
-    },
-  };
-  const authService = new AuthenticationServiceApplication(config);
 
-  const authDb = new juggler.DataSource({
-    name: 'AuthDB',
-    connector: 'postgresql',
-    host: 'localhost',
-    port: '6000',
-    user: 'postgres',
-    password: 'super-secret',
-    database: 'postgres',
-    schema: 'main',
-  });
-  authService.dataSource(authDb);
+  const config = new DocumentBuilder()
+    .setTitle('NestJS x SourceLoop')
+    .setDescription('Trying out sourceloop with nestjs')
+    .setVersion('1.0')
+    .addTag('NestJS Routes')
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup(process.env.DEFAULT_SWAGGER_ROUTE, app, document);
 
-  const authCache = new juggler.DataSource({
-    name: 'AuthCache',
-    connector: 'kv-memory',
-  });
-  authService.dataSource(authCache);
+  sourceloop = new SourceLoop();
+  for (const service of sourceloop.services) {
+    await service.boot();
+    const swaggerPath = `${process.env.DEFAULT_SWAGGER_ROUTE ?? 'swagger'}/${
+      service.swaggerPath
+    }`;
+    SwaggerModule.setup(
+      swaggerPath,
+      app,
+      await service.appInstance.restServer.getApiSpec(),
+    );
+  }
+  global.sourceloop = sourceloop;
 
-  await authService.boot();
-  await authService.start();
-  global.authService = authService;
   await app.listen(4000);
 }
 bootstrap();
